@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Подработка — оставить заявку</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<header class="top">
+  <div class="brand"><img class="logo" src="assets/logo.png" alt="Batys Quat"></div>
+</header>
+
+<div class="container">
+  <div class="card about-card">
+    <div class="about-text">
+      <h2>Ерназаров Айдар</h2>
+      <p class="about-role">Инженер по автоматизации · Эксперт КИПиА · Технический руководитель</p>
+      <p class="about-desc">Проектирование, модернизация и пусконаладка промышленных систем любой сложности. Более 15 лет опыта внедрения передовых решений на базе оборудования Siemens, ABB и B&amp;R.</p>
+    </div>
+  </div>
+  <div id="app"></div>
+</div>
+
+<script>
+const API = '/api';
+
+async function api(path, opts = {}) {
+  const res = await fetch(API + path, {
+    ...opts,
+    headers: { 'Content-Type': 'application/json', ...(opts.headers || {}) },
+    body: opts.body ? JSON.stringify(opts.body) : undefined
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || 'Ошибка запроса');
+  return data;
+}
+
+function render() {
+  const app = document.getElementById('app');
+  app.innerHTML = `
+    <h1>Оставить заявку на подработку</h1>
+    <p class="subtitle">Заполните форму — заявка сразу появится у администратора, регистрация не нужна.</p>
+
+    <div class="card">
+      <form id="reqForm">
+        <label>Описание работы</label>
+        <textarea id="description" required placeholder="Что нужно сделать, объём работы, сроки, бюджет и т.п."></textarea>
+
+        <label>Ваше имя</label>
+        <input type="text" id="submitter_name" placeholder="Как к вам обращаться">
+
+        <label>Контакт для связи</label>
+        <input type="text" id="contact" required placeholder="Телефон, telegram и т.п.">
+
+        <button class="primary" type="submit">Отправить заявку</button>
+      </form>
+      <div class="error" id="formError" style="display:none"></div>
+      <div class="success" id="formSuccess" style="display:none"></div>
+    </div>
+  `;
+
+  document.getElementById('reqForm').onsubmit = async (e) => {
+    e.preventDefault();
+    const errBox = document.getElementById('formError');
+    const okBox = document.getElementById('formSuccess');
+    errBox.style.display = 'none'; okBox.style.display = 'none';
+    const body = {
+      submitter_name: document.getElementById('submitter_name').value.trim(),
+      description: document.getElementById('description').value.trim(),
+      contact: document.getElementById('contact').value.trim()
+    };
+    try {
+      await api('/requests', { method: 'POST', body });
+      okBox.textContent = 'Заявка отправлена! Мы свяжемся с вами по указанному контакту.';
+      okBox.style.display = 'block';
+      document.getElementById('reqForm').reset();
+    } catch (err) {
+      errBox.textContent = err.message;
+      errBox.style.display = 'block';
+    }
+  };
+}
+
+render();
+</script>
+</body>
+</html>

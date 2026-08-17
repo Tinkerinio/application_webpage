@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Админ-панель — заявки</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<header class="top">
+  <div class="brand"><img class="logo" src="assets/logo.png" alt="Batys Quat"><span>Админ-панель</span></div>
+  <nav id="nav"></nav>
+</header>
+
+<div class="container" id="app"></div>
+
+<script>
+const API = '/api';
+let token = localStorage.getItem('token');
+let user = JSON.parse(localStorage.getItem('user') || 'null');
+let currentFilter = '';
+
+function logout() {
+  localStorage.removeItem('token'); localStorage.removeItem('user');
+  token = null; user = null; render();
+}
+
+async function api(path, opts = {}) {
+  const res = await fetch(API + path, {
+    ...opts,
+    headers: {
+      'Content-Type': 'application/json',
+      ...(token ? { Authorization: 'Bearer ' + token } : {}),
+      ...(opts.headers || {})
+    },
+    body: opts.body ? JSON.stringify(opts.body) : undefined
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || 'Ошибка запроса');
+  return data;
+}
+
+function renderNav() {
+  const nav = document.getElementById('nav');
+  if (user) {
+    nav.innerHTML = `<span style="font-size:14px;color:var(--muted)">${user.email}</span>
+      <button id="logoutBtn">Выйти</button>`;
+    document.getElementById('logoutBtn').onclick = logout;
+  } else nav.innerHTML = '';
+}
+
+function renderLogin() {
+  const app = document.getElementById('app');
+  app.innerHTML = `
+    <div class="auth-box">
+      <div class="card">
+        <h1>Вход администратора</h1>
+        <p class="subtitle">Доступ только для владельца сайта</p>
+        <form id="authForm">
+          <label>Email</label>
+          <input type="email" id="email" required autocomplete="username">
+          <label>Пароль</label>
+          <input type="password" id="password" required autocomplete="current-password">
+          <button class="primary" type="submit">Войти</button>
+        </form>
+        <div class="error" id="authError" style="display:none"></div>
+      </div>
+    </div>
+  `;
+
+  document.getElementById('authForm').onsubmit = async (e) => {
+    e.preventDefault();
+    const email = document.getElementById('email').value.trim();
+    const password = document.getElementById('password').value;
+    const errBox = document.getElementById('authError');
+    errBox.style.display = 'none';
+    try {
+      const data = await api('/auth/login', { method: 'POST', body: { email, password } });
+      if (data.user.role !== 'admin') {
+        errBox.textContent = 'У этого аккаунта нет прав администратора';
+        errBox.style.display = 'block';
+        return;
+      }
+      token = data.token; user = data.user;
+      localStorage.setItem('token', token);
+      localStorage.setItem('user', JSON.stringify(user));
+      render();
+    } catch (err) {
+      errBox.textContent = err.message;
+      errBox.style.display = 'block';
+    }
+  };
+}
+
+async function renderDashboard() {
+  const app = document.getElementById('app');
+  app.innerHTML = `
+    <h1>Заявки</h1>
+    <p class="subtitle">Все заявки пользователей на подработку</p>
+    <div class="tabs" id="tabs"></div>
+    <div id="list"><div class="empty">Загрузка…</div></div>
+  `;
+
+  const filters = [
+    { key: '', label: 'Все' },
+    { key: 'new', label: 'Новые' },
+    { key: 'in_progress', label: 'В работе' },
+    { key: 'done', label: 'Выполнены' },
+    { key: 'rejected', label: 'Отклонены' }
+  ];
+  const tabs = document.getElementById('tabs');
+  tabs.innerHTML = filters.map(f =>
+    `<button data-key="${f.key}" class="${f.key === currentFilter ? 'active' : ''}">${f.label}</button>`
+  ).join('');
+  tabs.querySelectorAll('button').forEach(btn => {
+    btn.onclick = () => { currentFilter = btn.dataset.key; renderDashboard(); };
+  });
+
+  loadRequests();
+}
+
+async function loadRequests() {
+  const box = document.getElementById('list');
+  try {
+    const q = currentFilter ? `?status=${currentFilter}` : '';
+    const rows = await api('/requests' + q);
+    if (!rows.length) {
+      box.innerHTML = '<div class="empty">Заявок нет</div>';
+      return;
+    }
+    box.innerHTML = rows.map(r => `
+      <div class="request-item">
+        <div class="row">
+          <div>
+            <div class="title">${escapeHtml(r.title)}</div>
+            <div class="meta">${escapeHtml(r.submitter_name || 'Без имени')} · ${new Date(r.created_at).toLocaleString('ru-RU')}</div>
+          </div>
+          <span class="badge ${r.status}">${statusLabel(r.status)}</span>
+        </div>
+        <div class="desc">${escapeHtml(r.description)}</div>
+        <div class="meta" style="margin-top:8px">
+          ${r.deadline ? `Срок: ${escapeHtml(r.deadline)} · ` : ''}
+          ${r.budget ? `Бюджет: ${escapeHtml(r.budget)} · ` : ''}
+          Контакт: ${escapeHtml(r.contact)}
+        </div>
+        <div class="footer">
+          <select class="status-select" data-id="${r.id}">
+            <option value="new" ${r.status === 'new' ? 'selected' : ''}>Новая</option>
+            <option value="in_progress" ${r.status === 'in_progress' ? 'selected' : ''}>В работе</option>
+            <option value="done" ${r.status === 'done' ? 'selected' : ''}>Выполнена</option>
+            <option value="rejected" ${r.status === 'rejected' ? 'selected' : ''}>Отклонена</option>
+          </select>
+        </div>
+      </div>
+    `).join('');
+
+    box.querySelectorAll('.status-select').forEach(sel => {
+      sel.onchange = async () => {
+        try {
+          await api(`/requests/${sel.dataset.id}/status`, { method: 'PATCH', body: { status: sel.value } });
+          loadRequests();
+        } catch (err) { alert(err.message); }
+      };
+    });
+  } catch (e) {
+    box.innerHTML = `<div class="error">${e.message}</div>`;
+  }
+}
+
+function statusLabel(s) {
+  return { new: 'Новая', in_progress: 'В работе', done: 'Выполнена', rejected: 'Отклонена' }[s] || s;
+}
+function escapeHtml(str) {
+  const d = document.createElement('div');
+  d.textContent = str || '';
+  return d.innerHTML;
+}
+
+function render() {
+  renderNav();
+  if (!user || user.role !== 'admin') renderLogin();
+  else renderDashboard();
+}
+
+render();
+</script>
+</body>
+</html>
